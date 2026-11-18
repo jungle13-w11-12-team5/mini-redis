@@ -1,0 +1,49 @@
+{
+  "run": "w0-cache-on-r3",
+  "writePct": 0,
+  "namePct": 20,
+  "zipfS": 1,
+  "vus": 8,
+  "reqs": 17581,
+  "rps": 585.8252385229661,
+  "errors": 0,
+  "all": {
+    "p50": 7.726319,
+    "p99": 74.07084760000018
+  },
+  "id": {
+    "p50": 7.4323,
+    "p99": 56.88124,
+    "n": null
+  },
+  "name": {
+    "p50": 10.679601,
+    "p99": 99.22492323,
+    "n": null
+  },
+  "write": {
+    "p50": null,
+    "p99": null,
+    "n": null
+  },
+  "cache": {
+    "hit": 10608,
+    "miss": 6973,
+    "bypass": 0,
+    "skip": 0,
+    "off": 0
+  },
+  "server": {
+    "stats": {
+      "hit": 10608,
+      "miss": 6973,
+      "bypass": 0,
+      "skip": 0,
+      "off": 0,
+      "dbsize": 6969,
+      "ver": "1"
+    },
+    "tblBefore": 2967219,
+    "tblAfter": 2967219
+  }
+}
