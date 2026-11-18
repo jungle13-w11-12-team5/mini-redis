@@ -1,0 +1,83 @@
+# mini-stack: 미니 레디스 + 미니 DBMS + 캐시 데모 서버 (+ 시드 · 벤치)
+# 사용: docker compose up -d --build   →  http://127.0.0.1:8088
+# 레디스 · DBMS는 인증이 없어서 포트를 밖으로 열지 않는다 (Q26). 데모 서버만 호스트 루프백에 연다.
+name: mini-stack
+
+services:
+  minired:
+    build: ./vendor/minired
+    image: mini-stack/minired
+    healthcheck:
+      # 이미지에 redis-cli가 없어서 bash /dev/tcp로 PING
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6379 && printf 'PING\\r\\n' >&3 && read -t 2 r <&3 && [[ $$r == +PONG* ]]"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minidb:
+    build:
+      context: .
+      dockerfile: docker/minidb.Dockerfile
+    image: mini-stack/minidb
+    environment:
+      MINIDB_WORKERS: "${MINIDB_WORKERS:-8}"
+    volumes:
+      - dbdata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  seed:
+    image: mini-stack/minidb
+    entrypoint: ["/usr/local/bin/seed.sh"]
+    environment:
+      DB_URL: http://minidb:8080
+      ROWS: "${SEED_ROWS:-100000}"
+    depends_on:
+      minidb:
+        condition: service_healthy
+    restart: "no"
+
+  demo:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    image: mini-stack/demo
+    environment:
+      REDIS_HOST: minired
+      REDIS_PORT: "6379"
+      DB_URL: http://minidb:8080
+      # DB 동시 호출 상한 ≤ DBMS 워커 수 (Q20). keep-alive 연결 하나가 워커 하나를 붙잡는다
+      DB_MAX_CONCURRENCY: "${DB_MAX_CONCURRENCY:-6}"
+      CACHE_TTL_SEC: "${CACHE_TTL_SEC:-60}"
+      CACHE_EMPTY_TTL_SEC: "5"
+      CACHE_MAX_BYTES: "${CACHE_MAX_BYTES:-262144}"
+      REDIS_TIMEOUT_MS: "50"
+      DEMO_CONSOLE: "${DEMO_CONSOLE:-on}"
+      DEMO_TEST_HOOKS: "${DEMO_TEST_HOOKS:-on}"
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8088}:8080"
+    depends_on:
+      minired:
+        condition: service_healthy
+      minidb:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /api/health HTTP/1.0\\r\\n\\r\\n' >&3 && read -t 2 r <&3 && [[ $$r == *200* ]]"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["bench"]
+    volumes:
+      - ./bench:/bench
+    working_dir: /bench
+
+volumes:
+  dbdata:
