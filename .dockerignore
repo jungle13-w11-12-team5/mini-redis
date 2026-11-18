@@ -1,0 +1,6 @@
+.git
+**/build
+**/.gradle
+bench
+docs
+node_modules
