@@ -1,5 +1,71 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><title>mini-stack</title></head>
-<body><div id="app">준비 중</div></body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-stack 캐시 데모</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+    --hit: #1f9d55; --miss: #d97706; --bypass: #c2410c; --skip: #7c3aed; --off: #64748b;
+    --redis: #dc2626; --db: #2563eb; --demo: #64748b; --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  .top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; }
+  .brand b { font-size: 18px; margin-right: 10px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .switches { display: flex; gap: 16px; }
+  .switch { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+  .stats { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); margin-left: auto; }
+  .stats b { color: var(--ink); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; padding: 16px 20px 40px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .panel.wide { grid-column: 1 / -1; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 13px; margin: 16px 0 4px; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 80px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  input.grow { flex: 3; }
+  button { padding: 7px 12px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button.on { background: var(--hit); border-color: var(--hit); }
+  button.off { background: var(--off); border-color: var(--off); }
+  button.warn { background: var(--bypass); border-color: var(--bypass); }
+  .hint, .muted { color: var(--muted); font-size: 12px; }
+  .err { color: var(--bypass); }
+  .good { color: var(--hit); font-weight: 600; }
+  .race .err { font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+  pre { margin: 4px 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; max-height: 220px; overflow: auto; background: #f3f4f6; padding: 6px 8px; border-radius: 6px; }
+  code { font-size: 12px; }
+  .badge { display: inline-block; min-width: 52px; text-align: center; padding: 1px 6px; border-radius: 99px; color: #fff; font-size: 12px; font-weight: 600; }
+  .c-hit { background: var(--hit); } .c-miss { background: var(--miss); } .c-bypass { background: var(--bypass); }
+  .c-skip { background: var(--skip); } .c-off, .c-- { background: var(--off); }
+  .trace { display: grid; grid-template-columns: minmax(240px, 320px) 1fr; gap: 16px; }
+  .hist { list-style: none; margin: 0; padding: 0; }
+  .hist li { padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist li.sel { background: #eef2ff; }
+  .step { display: grid; grid-template-columns: 64px minmax(0, 1fr) 220px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .who { font-size: 12px; font-weight: 700; }
+  .t-redis { color: var(--redis); } .t-minidb { color: var(--db); } .t-demo { color: var(--demo); }
+  .what code { word-break: break-all; }
+  .res { color: var(--muted); font-size: 12px; }
+  .bar { position: relative; height: 16px; background: #f1f5f9; border-radius: 4px; }
+  .bar .fill { height: 100%; border-radius: 4px; }
+  .fill.t-redis { background: var(--redis); } .fill.t-minidb { background: var(--db); } .fill.t-demo { background: var(--demo); }
+  .bar span { position: absolute; right: 4px; top: 0; font-size: 11px; line-height: 16px; }
+  .race-step { padding: 3px 0; font-size: 13px; }
+  .log .entry { border-top: 1px solid var(--line); padding: 6px 0; }
+  .quick { gap: 6px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; padding: 12px; } .trace { grid-template-columns: 1fr; } .step { grid-template-columns: 56px 1fr; } .step .bar { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/app.js"></script>
+</body>
 </html>
