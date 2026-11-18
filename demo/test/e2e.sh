@@ -28,8 +28,21 @@ wait_healthy() {   # $1 서비스
   done
   return 1
 }
+# users:ver 값. 레디스를 재시작하면 키가 없다(영속성 없음) → 서버처럼 0으로 읽는다
+getver() { redis "GET users:ver" | sed -nE 's/.*"reply":"\\"([0-9]+)\\"".*/\1/p' | grep . || echo 0; }
+# 컨테이너 healthy ≠ 데모 서버가 다시 붙음 (차단기 1초 + DNS 재조회). 프로브 id로 X-Cache가 bypass가 아닐 때까지
+wait_cache_back() {
+  for _ in $(seq 1 40); do
+    req "$B/api/users/$PROBE"; [ "$XC" != bypass ] && [ "$CODE" != 503 ] && return 0
+    sleep 0.25
+  done
+  return 1
+}
+PROBE=108   # 복구 대기 전용 id (아래 검사에 안 씀)
 
 setting "cache=on&mode=gen"
+# 연속 실행해도 같은 출발점: API 쓰기 한 번 = INCR → 앞 실행이 남긴 캐시 키는 전부 옛 세대
+curl -s -X PUT "$B/api/users/100?age=30" > /dev/null
 
 echo "## 읽기 — cache-aside"
 req "$B/api/users/101"; check "id 첫 조회 miss" "$XC" miss; check "200" "$CODE" 200
@@ -38,7 +51,7 @@ req "$B/api/users/101"; check "id 두 번째 hit" "$XC" hit; check "hit 본문 =
 has "NDJSON 마지막 줄 ok:true" "$BODY" '{"ok":true,"rowCount":1}'
 req "$B/api/users/999999"; check "없는 id 404" "$CODE" 404; check "없는 id miss" "$XC" miss
 req "$B/api/users/999999"; check "없는 id도 캐시 (hit)" "$XC" hit; check "hit도 404" "$CODE" 404
-ver=$(redis "GET users:ver" | sed -E 's/.*"reply":"\\"([0-9]+)\\"".*/\1/')
+ver=$(getver)
 ttl=$(redis "TTL users:v$ver:id:999999" | sed -E 's/.*\(integer\) ([0-9-]+).*/\1/')
 [ "$ttl" -ge 1 ] && [ "$ttl" -le 5 ] && ok "빈 결과 TTL ≤ 5초 ($ttl)" || bad "빈 결과 TTL $ttl"
 ttl=$(redis "TTL users:v$ver:id:101" | sed -E 's/.*\(integer\) ([0-9-]+).*/\1/')
@@ -70,9 +83,9 @@ req -X PUT "$B/api/users/101?age=abc"; check "age 문자 → 400" "$CODE" 400
 req -X PUT "$B/api/users/101"; check "바꿀 값 없음 → 400" "$CODE" 400
 
 echo "## 쓰기 두 길 — 세대 번호 (Q13-C)"
-v0=$(redis "GET users:ver" | sed -E 's/.*\\"([0-9]+)\\".*/\1/')
+v0=$(getver)
 req -X PUT "$B/api/users/101?age=41"; check "API 쓰기 200" "$CODE" 200; has "INCR" "$BODY" "INCR users:ver"
-v1=$(redis "GET users:ver" | sed -E 's/.*\\"([0-9]+)\\".*/\1/')
+v1=$(getver)
 check "ver +1" "$v1" "$((v0 + 1))"
 req "$B/api/users/101"; check "API 쓰기 뒤 miss" "$XC" miss; has "새 값" "$BODY" '"age"' ; has "새 값 41" "$BODY" ",41]"
 req "$B/api/users?name=lee"; check "검색 키도 같이 낡음 (miss)" "$XC" miss
@@ -112,11 +125,20 @@ has "DB 직접 SELECT" "$(curl -s -X POST --data-binary 'SELECT * FROM users WHE
 
 echo "## 레디스 다운 → DB 우회 (Q21)"
 docker compose stop minired > /dev/null 2>&1
-s=$(date +%s%N); req "$B/api/users/104"; ms=$(( ($(date +%s%N) - s) / 1000000 ))
+# 시간은 curl이 잰 왕복만 (스크립트의 프로세스 띄우기 비용이 Git Bash에서 수백 ms라 섞이면 안 됨)
+ms=$(curl -s -o /dev/null -w '%{time_total}' "$B/api/users/104" | awk '{printf "%d", $1 * 1000}')
+req "$B/api/users/104"
 check "레디스 다운 읽기 200" "$CODE" 200; check "X-Cache bypass" "$XC" bypass
-[ "$ms" -lt 1000 ] && ok "우회 응답 ${ms}ms" || bad "우회가 느림 ${ms}ms"
+# 첫 요청은 멈춘 컨테이너 이름 조회 실패를 한 번 치른다 (0.4~1.3초 관측) → 상한만 본다
+[ "$ms" -lt 5000 ] && ok "첫 우회 응답 ${ms}ms (< 5초)" || bad "첫 우회가 느림 ${ms}ms"
+# 그다음은 차단기(1초)가 열려 레디스를 안 부른다 → 바로 DB
+ms=$(curl -s -o /dev/null -w '%{time_total}' "$B/api/users/104" | awk '{printf "%d", $1 * 1000}')
+req "$B/api/users/104"
+check "두 번째도 bypass" "$XC" bypass
+[ "$ms" -lt 200 ] && ok "차단기 열린 뒤 우회 ${ms}ms (< 200ms)" || bad "차단기 뒤에도 느림 ${ms}ms"
 req -X PUT "$B/api/users/104?age=60"; check "레디스 다운 쓰기: DB는 성공" "$CODE" 200; has "무효화 실패 보고" "$BODY" "실패"
 docker compose start minired > /dev/null 2>&1; wait_healthy minired
+wait_cache_back && ok "레디스 복구 → 데모 서버 재연결" || bad "레디스 복구 뒤 10초 넘게 bypass"
 req "$B/api/users/104"; check "레디스 복구 뒤 miss (비어 있음)" "$XC" miss
 req "$B/api/users/104"; check "레디스 복구 뒤 hit" "$XC" hit
 
@@ -126,6 +148,7 @@ docker compose stop minidb > /dev/null 2>&1
 req "$B/api/users/105"; check "DB 다운이어도 캐시 hit은 응답" "$XC" hit
 req "$B/api/users/106"; check "DB 다운 + miss → 503" "$CODE" 503
 docker compose start minidb > /dev/null 2>&1; wait_healthy minidb
+wait_cache_back && ok "DB 복구 → 데모 서버 재연결" || bad "DB 복구 뒤 10초 넘게 503"
 req "$B/api/users/106"; check "DB 복구 뒤 miss (실패는 캐시 안 됨)" "$XC" miss; check "DB 복구 뒤 200" "$CODE" 200
 
 echo "## 추적 (Q25)"
