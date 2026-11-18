@@ -22,15 +22,15 @@ fi
 
 start=$(date +%s%N)
 awk -v rows="$ROWS" -v batch="$BATCH" -v seed="${SEED:-42}" 'BEGIN {
-  srand(seed)
+  x = seed   # Park-Miller LCG: awk 구현마다 rand()가 달라서 직접 (16807 · 2^31 < 2^53이라 double로 정확)
   for (i = 0; i < rows; i++) {
-    r = rand()
+    x = (x * 16807) % 2147483647; r = x / 2147483647
     if (r < 0.20) name = "kim"
     else if (r < 0.215) name = "lee"
     else if (r < 0.225) name = "park"
     else if (r < 0.23) name = "김민수"
-    else name = sprintf("user%05d", int(rand() * 10000))
-    age = 18 + int(rand() * 60)
+    else { x = (x * 16807) % 2147483647; name = sprintf("user%05d", int(x / 2147483647 * 10000)) }
+    x = (x * 16807) % 2147483647; age = 18 + int(x / 2147483647 * 60)
     printf "INSERT INTO users VALUES (\x27%s\x27, %d);", name, age
     if ((i + 1) % batch == 0 || i == rows - 1) printf "\n"
   }
